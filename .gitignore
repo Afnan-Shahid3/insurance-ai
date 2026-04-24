@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+env/
+
+# Model files (important)
+models/*.pkl
+
+# Data (optional if large)
+data/
+
+# Streamlit cache
+.streamlit/
+
+# OS files
+.DS_Store
