@@ -1,6 +1,6 @@
-# 🧠 Insurance Claim Cost Prediction System (AI Project)
+# Insurance Claim Cost Prediction System (AI Project)
 
-## 📌 Project Overview
+## Project Overview
 
 This project is an **AI-based insurance claim cost prediction system** built as part of an **Intro to Artificial Intelligence course**.
 
@@ -10,7 +10,7 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## 🎯 Objectives
+## Objectives
 
 - Predict insurance claim cost using machine learning
 - Classify risk level (Low / Medium / High)
@@ -20,7 +20,7 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## ⚙️ Technologies Used
+## Technologies Used
 
 - Python
 - Pandas
@@ -31,7 +31,7 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## 📊 Features
+## Features
 
 - 📥 Input insurance claim details via UI
 - 🤖 Predict claim cost using ML model
@@ -41,7 +41,7 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## 🧪 Machine Learning Approach
+## Machine Learning Approach
 
 - Problem Type: Regression
 - Model Used: XGBoost / Random Forest
@@ -50,7 +50,7 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## 🚀 How to Run the Project
+## How to Run the Project
 
 ### 1. Clone the repository
 ```bash
