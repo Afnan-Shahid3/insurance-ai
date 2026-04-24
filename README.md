@@ -78,8 +78,8 @@ streamlit run app.py
 
 ## Project Team
 
-# Syed Afnan — Roll No: 30224
-# Faraz Ahmed — Roll No: 30503
+- Syed Afnan — Roll No: 30224
+- Faraz Ahmed — Roll No: 30503
 
 ---
 
