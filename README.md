@@ -20,23 +20,6 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ---
 
-## 🏗️ System Architecture
-
-User Input (Streamlit UI)
-↓
-Data Preprocessing
-↓
-Machine Learning Model (XGBoost / Random Forest)
-↓
-Prediction (Claim Cost)
-↓
-Explanation Layer (Rule-based / Feature Importance)
-↓
-Output Display (Cost + Reason)
-
-
----
-
 ## ⚙️ Technologies Used
 
 - Python
@@ -73,22 +56,23 @@ Output Display (Cost + Reason)
 ```bash
 git clone https://github.com/YOUR_USERNAME/insurance-ai.git
 cd insurance-ai
-
+```
 ### 2. Create virtual enviornment
 ```bash
 python -m venv venv
-
+```
 ### 3. Activate Enviorment
 ```bash
 venv\scripts\activate
-
+```
 ### 4. Install dependencies
 ```bash
 pip install -r requirements.txt
-
+```
 ### 5. Run Streamlit app
 ```bash
 streamlit run app.py
+```
 
 ---
 
@@ -98,3 +82,11 @@ streamlit run app.py
 # Faraz Ahmed — Roll No: 30503
 
 ---
+
+## Learning Outcomes
+- Understanding supervised machine learning (regression)
+- Working with real-world structured data
+- Model training and evaluation workflow
+- Building interactive AI applications
+- Basics of explainable AI
+
