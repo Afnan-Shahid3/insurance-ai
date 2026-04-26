@@ -14,6 +14,50 @@ data/
 
 # Streamlit cache
 .streamlit/
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE files
+.vscode/
+.idea/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
 
 # OS files
 .DS_Store
+Thumbs.db
+
+# Model artifacts (DO NOT push trained models)
+models/saved_models/
+models/scalers/
+models/encoders/
+*.pkl
+
+# Streamlit cache
+.streamlit/
+
+# Logs and outputs
+outputs/logs/
+outputs/plots/
+
+# Large datasets (keep raw data local)
+data/raw/
+data/processed/
+
+# Optional: if dataset is big and you don’t want it in GitHub
+# data/
+
+# Environment variables (if you add later)
+.env    
+# OS files
+.DS_Store
+
+reports/
