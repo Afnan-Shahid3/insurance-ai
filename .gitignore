@@ -1,63 +1,74 @@
-# Python
-__pycache__/
-*.pyc
 
-# Virtual env
-venv/
-env/
-
-# Model files (important)
-models/*.pkl
-
-# Data (optional if large)
-data/
-
-# Streamlit cache
-.streamlit/
+# =========================
 # Python cache
+# =========================
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 
-# Virtual environment
+# =========================
+# Virtual Environments
+# =========================
 venv/
 env/
 .venv/
 
-# IDE files
-.vscode/
-.idea/
-
+# =========================
 # Jupyter Notebook checkpoints
+# =========================
 .ipynb_checkpoints/
 
+# =========================
+# Models (ML artifacts)
+# =========================
+*.pkl
+*.joblib
+
+# Keep structure but ignore heavy model files
+v1-basic-model/models/
+v2-advanced-engine/models/
+
+# =========================
+# Data files (optional - usually large)
+# =========================
+*.csv
+*.xlsx
+
+# If you want to KEEP raw data, comment above and use:
+# !data/raw/
+
+v1-basic-model/data/
+v2-advanced-engine/data/
+
+# =========================
+# Outputs (plots, reports, logs)
+# =========================
+outputs/
+reports/
+logs/
+
+v1-basic-model/outputs/
+v2-advanced-engine/outputs/
+
+# =========================
+# Streamlit
+# =========================
+.streamlit/
+
+# =========================
 # OS files
+# =========================
 .DS_Store
 Thumbs.db
 
-# Model artifacts (DO NOT push trained models)
-models/saved_models/
-models/scalers/
-models/encoders/
-*.pkl
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
 
-# Streamlit cache
-.streamlit/
-
-# Logs and outputs
-outputs/logs/
-outputs/plots/
-
-# Large datasets (keep raw data local)
-data/raw/
-data/processed/
-
-# Optional: if dataset is big and you don’t want it in GitHub
-# data/
-
-# Environment variables (if you add later)
-.env    
-# OS files
-.DS_Store
-
-reports/
+# =========================
+# Environment variables
+# =========================
+.env
