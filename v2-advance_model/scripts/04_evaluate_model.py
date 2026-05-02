@@ -1,249 +1,81 @@
-"""
-Model Evaluation and Decision Engine Demo Script
-Transforms ML predictions into insurance business decisions
-"""
-
 import os
-import sys
 import pandas as pd
 import numpy as np
 import joblib
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# Add project root to path to import src modules
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+MODEL_DIR = os.path.join('v2-advance_model', 'models')
+DATA_DIR = os.path.join('v2-advance_model', 'data', 'processed')
 
-def inverse_log_transform(x):
-    return np.expm1(x)
+print("Loading models...")
+classifier = joblib.load(os.path.join(MODEL_DIR, 'classifier.pkl'))
+regressor = joblib.load(os.path.join(MODEL_DIR, 'regressor.pkl'))
 
-from src.models.train import load_processed_data
-from src.models.decision_engine import calculate_final_payout
+print("Loading test data...")
+X_test = pd.read_csv(os.path.join(DATA_DIR, 'X_test.csv'))
+flag_test = pd.read_csv(os.path.join(DATA_DIR, 'test_claim_flag.csv'))
+amount_test = pd.read_csv(os.path.join(DATA_DIR, 'test_claim_amount.csv'))
+original_test = pd.read_csv(os.path.join(DATA_DIR, 'test_target_original.csv'))
 
-# Define paths
-MODEL_PATH = 'v2-advance_model/models/saved_models/best_model.pkl'
-DATA_DIR = 'v2-advance_model/data/processed'
+y_flag_test = flag_test['claim_flag']
+y_amount_test = amount_test['claim_amount']
+y_original_test = original_test['original_claim']
 
-# Step 1: Load trained model
-print("=" * 70)
-print("STEP 1: Loading Trained Model")
-print("=" * 70)
-model = joblib.load(MODEL_PATH)
-print(f"Model loaded from: {MODEL_PATH}")
+print("Running prediction pipeline...")
+flag_pred = classifier.predict(X_test)
 
-# Step 2: Load test data
-print("\n" + "=" * 70)
-print("STEP 2: Loading Test Data")
-print("=" * 70)
-X_train, X_test, y_train, y_test = load_processed_data(DATA_DIR)
-y_test = np.array(y_test)
-print(f"Test features shape: {X_test.shape}")
-print(f"Test target shape: {y_test.shape}")
+mask_pred_positive = flag_pred == 1
+X_test_positive = X_test[mask_pred_positive]
 
-# Step 3: Make predictions (already in log scale, convert to real)
-print("\n" + "=" * 70)
-print("STEP 3: Making Predictions")
-print("=" * 70)
-y_pred_log = model.predict(X_test)
-y_pred_real = inverse_log_transform(y_pred_log)
-print(f"Predictions made for {len(y_pred_real)} test samples")
-print(f"Prediction range: ${y_pred_real.min():,.2f} - ${y_pred_real.max():,.2f}")
+amount_pred = np.zeros(len(X_test))
+if len(X_test_positive) > 0:
+    amount_pred_log = regressor.predict(X_test_positive)
+    amount_pred_positive = np.expm1(amount_pred_log)
+    amount_pred[mask_pred_positive] = amount_pred_positive
 
-# Step 4: Create sample test cases with decision engine
-print("\n" + "=" * 70)
-print("STEP 4: Running Decision Engine on Sample Cases")
-print("=" * 70)
+print("=" * 50)
+print("CLASSIFIER RESULTS")
+print("=" * 50)
+print(f"Accuracy: {accuracy_score(y_flag_test, flag_pred):.4f}")
+print(f"Precision: {precision_score(y_flag_test, flag_pred, zero_division=0):.4f}")
+print(f"Recall: {recall_score(y_flag_test, flag_pred, zero_division=0):.4f}")
+print(f"F1 Score: {f1_score(y_flag_test, flag_pred, zero_division=0):.4f}")
 
-# Create sample scenarios for demonstration
-sample_scenarios = [
-    {
-        'name': 'Scenario A: Clean Record, Gold Customer',
-        'predicted_cost': y_pred_real[0],
-        'input_data': {
-            'DUI': False,
-            'valid_license': True,
-            'fraud_indicator': False,
-            'policy_expired': False,
-            'authorized_driver': True,
-            'illegal_activity': False,
-            'commercial_use': False,
-            'street_racing': False,
-            'roadworthy': True,
-            'geographic_exclusion': False,
-            'fault_percentage': 0,
-            'speeding_penalty': 0,
-            'distracted_driving': False,
-            'dashcam': True,
-            'failure_to_mitigate': False,
-            'preexisting_damage_pct': 0,
-            'depreciation_pct': 0,
-            'salvage_value': 0,
-            'oem_parts': True,
-            'policy_tier': 'Gold',
-            'customer_tenure': 7,
-            'previous_claims': 1,
-            'accident_forgiveness': False
-        }
-    },
-    {
-        'name': 'Scenario B: At-Fault, No Dashcam',
-        'predicted_cost': y_pred_real[1],
-        'input_data': {
-            'DUI': False,
-            'valid_license': True,
-            'fraud_indicator': False,
-            'policy_expired': False,
-            'authorized_driver': True,
-            'illegal_activity': False,
-            'commercial_use': False,
-            'street_racing': False,
-            'roadworthy': True,
-            'geographic_exclusion': False,
-            'fault_percentage': 30,
-            'speeding_penalty': 20,
-            'distracted_driving': True,
-            'dashcam': False,
-            'failure_to_mitigate': False,
-            'preexisting_damage_pct': 0,
-            'depreciation_pct': 10,
-            'salvage_value': 0,
-            'oem_parts': True,
-            'policy_tier': 'Basic',
-            'customer_tenure': 2,
-            'previous_claims': 2,
-            'accident_forgiveness': False
-        }
-    },
-    {
-        'name': 'Scenario C: Platinum Customer, Minor Claim',
-        'predicted_cost': y_pred_real[2],
-        'input_data': {
-            'DUI': False,
-            'valid_license': True,
-            'fraud_indicator': False,
-            'policy_expired': False,
-            'authorized_driver': True,
-            'illegal_activity': False,
-            'commercial_use': False,
-            'street_racing': False,
-            'roadworthy': True,
-            'geographic_exclusion': False,
-            'fault_percentage': 10,
-            'speeding_penalty': 0,
-            'distracted_driving': False,
-            'dashcam': True,
-            'failure_to_mitigate': False,
-            'preexisting_damage_pct': 0,
-            'depreciation_pct': 5,
-            'salvage_value': 0,
-            'oem_parts': True,
-            'policy_tier': 'Platinum',
-            'customer_tenure': 12,
-            'previous_claims': 0,
-            'accident_forgiveness': True
-        }
-    },
-    {
-        'name': 'Scenario D: DENIED - DUI + No License',
-        'predicted_cost': y_pred_real[3],
-        'input_data': {
-            'DUI': True,
-            'valid_license': False,
-            'fraud_indicator': False,
-            'policy_expired': False,
-            'authorized_driver': True,
-            'illegal_activity': False,
-            'commercial_use': False,
-            'street_racing': False,
-            'roadworthy': True,
-            'geographic_exclusion': False,
-            'fault_percentage': 0,
-            'speeding_penalty': 0,
-            'distracted_driving': False,
-            'dashcam': True,
-            'failure_to_mitigate': False,
-            'preexisting_damage_pct': 0,
-            'depreciation_pct': 0,
-            'salvage_value': 0,
-            'oem_parts': True,
-            'policy_tier': 'Gold',
-            'customer_tenure': 5,
-            'previous_claims': 0,
-            'accident_forgiveness': False
-        }
-    }
-]
+print("\n" + "=" * 50)
+print("REGRESSION RESULTS")
+print("=" * 50)
+mask_actual_positive = y_flag_test == 1
+y_true_positive = y_original_test[mask_actual_positive]
+y_pred_positive = amount_pred[mask_actual_positive]
 
-# Process each scenario
-for scenario in sample_scenarios:
-    print("\n" + "-" * 70)
-    print(scenario['name'])
-    print("-" * 70)
-    
-    result = calculate_final_payout(
-        scenario['predicted_cost'],
-        scenario['input_data']
-    )
-    
-    print(f"\nML PREDICTED COST: ${result['base_amount']:,.2f}")
-    
-    if result['is_denied']:
-        print(f"\n*** CLAIM DENIED ***")
-        print(f"Reason: {result['denial_reason']}")
-        print(f"FINAL PAYOUT: $0.00")
-    else:
-        print(f"\n--- REDUCTIONS APPLIED ---")
-        if result['reductions']:
-            for reason, amount in result['reductions'].items():
-                print(f"  - {reason}: -${amount:,.2f}")
-            print(f"  Subtotal after reductions: ${result['reduced_amount']:,.2f}")
-        else:
-            print("  No reductions applied")
-        
-        print(f"\n--- LOYALTY ADJUSTMENTS ---")
-        if result['loyalty_benefits']:
-            for benefit in result['loyalty_benefits']:
-                print(f"  + {benefit}")
-        else:
-            print("  No loyalty benefits applied")
-        
-        print(f"\n========================================")
-        print(f"FINAL APPROVED PAYOUT: ${result['final_payout']:,.2f}")
-        print(f"========================================")
-        print(f"\nExplanation: {result['explanation']}")
+if len(y_true_positive) > 0:
+    print(f"MAE: ${mean_absolute_error(y_true_positive, y_pred_positive):.2f}")
+    print(f"RMSE: ${np.sqrt(mean_squared_error(y_true_positive, y_pred_positive)):.2f}")
+    print(f"R² Score: {r2_score(y_true_positive, y_pred_positive):.4f}")
+else:
+    print("No actual positive claims for regression metrics")
 
-# Summary comparison
-print("\n" + "=" * 70)
-print("SUMMARY: ML PREDICTION vs FINAL INSURANCE DECISION")
-print("=" * 70)
-print(f"\n{'Scenario':<35} {'ML Prediction':>15} {'Final Payout':>15}")
-print("-" * 70)
-for scenario in sample_scenarios:
-    result = calculate_final_payout(
-        scenario['predicted_cost'],
-        scenario['input_data']
-    )
-    name = scenario['name'][:33]
-    ml_pred = f"${result['base_amount']:,.2f}"
-    final = f"${result['final_payout']:,.2f}" if not result['is_denied'] else "$0.00 (DENIED)"
-    print(f"{name:<35} {ml_pred:>15} {final:>15}")
+print("\n" + "=" * 50)
+print("PREDICTION DEBUG")
+print("=" * 50)
+print(f"Min predicted claim amount: ${amount_pred[amount_pred > 0].min():.2f}" if any(amount_pred > 0) else "Min predicted: $0.00")
+print(f"Max predicted claim amount: ${amount_pred.max():.2f}")
+print(f"Mean predicted claim amount: ${amount_pred.mean():.2f}")
+print(f"Percentage of zero predictions: {(flag_pred == 0).mean() * 100:.2f}%")
+print(f"Number of predicted claims: {mask_pred_positive.sum()}")
+print(f"Number of actual claims: {mask_actual_positive.sum()}")
 
-print("\n" + "=" * 70)
-print("EVALUATION COMPLETE!")
-print("=" * 70)
-print("""
-How ML Prediction is Converted to Business Decision:
--------------------------------------------------------
-1. ML model predicts claim cost (in log scale, then converted to real dollars)
-2. Decision engine applies business rules:
-   - Hard denial rules (DUI, no license, fraud, etc.) → immediate rejection
-   - Reduction rules (fault %, speeding, no evidence) → percentage penalties
-   - Loyalty adjustments (tier, tenure, claim history) → bonus percentages
-3. Final payout = ML prediction - reductions + loyalty bonuses
+print("\n" + "=" * 50)
+print("FINAL SUMMARY")
+print("=" * 50)
+if np.all(flag_pred == 0):
+    print("WARNING: All predictions are zero claims!")
+elif np.var(amount_pred) < 1e-5:
+    print("WARNING: Model collapsed - near-zero variance in predictions!")
+else:
+    print("Sanity checks passed")
 
-Key Business Logic:
-------------------
-- Clean records with high loyalty = higher payouts
-- At-fault accidents with no evidence = significant reductions
-- Major violations (DUI, fraud) = automatic denial
-- Customer retention through tier benefits and tenure rewards
-""")
+if len(y_true_positive) > 0:
+    positive_errors = np.abs(y_true_positive - y_pred_positive)
+    print(f"Average error on positive claims: ${positive_errors.mean():.2f}")

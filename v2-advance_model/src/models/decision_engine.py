@@ -4,6 +4,7 @@ Transforms ML predictions into business decisions
 """
 
 import numpy as np
+from typing import Dict, Tuple
 
 
 def check_denial_conditions(input_data):
@@ -286,3 +287,84 @@ def calculate_final_payout(predicted_cost, input_data):
     result['explanation'] = ". ".join(explanation_parts) if explanation_parts else "Claim approved with standard processing."
     
     return result
+
+def apply_claim_modifiers(raw_prediction: float, modifiers: dict) -> Tuple[float, dict]:
+    """
+    Apply percentage-based adjustments to the raw ML prediction.
+    Each modifier is a multiplier (1.0 = no change, 0.8 = 20% reduction, 1.2 = 20% increase).
+    
+    Args:
+        raw_prediction: Dollar amount from the ML regressor (after expm1)
+        modifiers: dict of modifier name → multiplier float
+    
+    Returns:
+        Adjusted claim amount (float)
+    """
+    try:
+        amount = float(raw_prediction)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"raw_prediction must be a numeric scalar, got {type(raw_prediction).__name__}: {raw_prediction}"
+        ) from exc
+
+    breakdown = {}
+
+    for name, multiplier in modifiers.items():
+        try:
+            multiplier_value = float(multiplier)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Modifier '{name}' must be numeric, got {type(multiplier).__name__}: {multiplier}"
+            ) from exc
+
+        adjustment = amount * (multiplier_value - 1.0)
+        breakdown[name] = round(adjustment, 2)
+        amount *= multiplier_value
+
+    return max(0.0, float(round(amount, 2))), breakdown
+
+
+# Modifier lookup table — edit percentages here as your business rules change
+MODIFIER_TABLE = {
+    "accident_severity": {
+        "Minor":      0.70,   # -30%
+        "Moderate":   1.00,   #  no change (baseline)
+        "Major":      1.30,   # +30%
+        "Total Loss": 1.60,   # +60%
+    },
+    "has_dashcam": {
+        "Yes": 0.90,   # -10% (evidence available, faster settlement)
+        "No":  1.00,
+    },
+    "fault_percentage": None,  # handled separately (linear, see below)
+    "policy_tier": {
+        "Basic":    1.00,
+        "Gold":     1.10,   # +10% coverage
+        "Platinum": 1.20,   # +20% coverage
+    },
+}
+
+
+def build_modifiers(user_inputs: dict) -> dict:
+    """Convert UI inputs into a multiplier dict for apply_claim_modifiers()."""
+    modifiers = {}
+
+    # Accident severity
+    severity = user_inputs.get("accident_severity", "Moderate")
+    modifiers["Accident Severity"] = MODIFIER_TABLE["accident_severity"].get(severity, 1.0)
+
+    # Dashcam discount
+    modifiers["Dashcam Discount"] = MODIFIER_TABLE["has_dashcam"].get(
+        user_inputs.get("has_dashcam", "No"), 1.0
+    )
+
+    # Policy tier multiplier
+    modifiers["Policy Tier"] = MODIFIER_TABLE["policy_tier"].get(
+        user_inputs.get("policy_tier", "Basic"), 1.0
+    )
+
+    # Fault percentage — linear scale (100% fault = full claim, 0% = no claim)
+    fault_pct = int(user_inputs.get("fault_percentage", 100))
+    modifiers["Fault Percentage"] = fault_pct / 100.0
+
+    return modifiers

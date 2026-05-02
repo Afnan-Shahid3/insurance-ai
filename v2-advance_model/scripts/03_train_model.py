@@ -1,97 +1,136 @@
-"""
-Model Training Script for Insurance Claim Prediction
-Loads processed data, trains models, and saves best model
-"""
-# Ensure input data is 2D with shape (1, n_features) before passing to model.predict
-
 import os
 import sys
-import pandas as pd
+import pickle
 import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import f1_score, precision_score, recall_score
 
-# Add project root to path to import src modules
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
-from src.models.train import (
-    load_processed_data,
-    train_models,
-    evaluate_model,
-    compare_models,
-    save_model
-)
+# Ensure imports for wrapper class from src.models
+SCRIPT_ROOT = os.path.dirname(os.path.abspath(__file__))
+SYS_PATH_ROOT = os.path.dirname(SCRIPT_ROOT)
+sys.path.insert(0, SYS_PATH_ROOT)
+from src.models.model_wrappers import ProbabilityThresholdClassifier
 
 # Define paths
-DATA_DIR = 'v2-advance_model/data/processed'
-MODEL_DIR = 'v2-advance_model/models/saved_models'
+DATA_DIR = os.path.join('v2-advance_model', 'data', 'processed')
+MODEL_DIR = os.path.join('v2-advance_model', 'models')
 
-# Ensure output directory exists
+# Ensure model directory exists
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# Step 1: Load processed data
-print("=" * 60)
-print("STEP 1: Loading Processed Data")
-print("=" * 60)
-X_train, X_test, y_train, y_test = load_processed_data(DATA_DIR)
-y_train = np.asarray(y_train)
-y_test = np.asarray(y_test)
-print(f"Train features shape: {X_train.shape}")
-print(f"Test features shape: {X_test.shape}")
-print(f"Train target shape: {y_train.shape}")
-print(f"Test target shape: {y_test.shape}")
+# Load training data
+print("Loading training data...")
+X_train = pd.read_csv(os.path.join(DATA_DIR, 'X_train.csv'))
+claim_flag_train = pd.read_csv(os.path.join(DATA_DIR, 'train_claim_flag.csv'))
+claim_amount_train = pd.read_csv(os.path.join(DATA_DIR, 'train_claim_amount.csv'))
 
-# Step 2: Train models
+# Extract targets
+y_flag = claim_flag_train['claim_flag'].astype(int)
+y_amount = pd.to_numeric(claim_amount_train['claim_amount'], errors='coerce')
+
+# Stage 1: Classifier - Predict claim_flag
 print("\n" + "=" * 60)
-print("STEP 2: Training Models")
+print("TRAINING claim_flag CLASSIFIER")
 print("=" * 60)
-models = train_models(X_train, y_train, random_state=42)
+print(f"Total training rows: {len(X_train)}")
+print("Class distribution:")
+flag_counts = y_flag.value_counts().sort_index()
+for target_class, count in flag_counts.items():
+    print(f"  {target_class}: {count} ({count / len(X_train):.2%})")
+print(f"Positive class ratio: {y_flag.mean():.2%}")
 
-# Step 3: Evaluate models
-print("\n" + "=" * 60)
-print("STEP 3: Evaluating Models")
-print("=" * 60)
+base_classifier = RandomForestClassifier(
+    n_estimators=100,
+    random_state=42,
+    class_weight='balanced'
+)
+base_classifier.fit(X_train, y_flag)
 
-models_results = {}
-for model_name, model in models.items():
-    print(f"\nEvaluating {model_name}...")
-    metrics = evaluate_model(model, X_test, y_test)
-    models_results[model_name] = metrics
-    print(f"  MAE:  {metrics['MAE']:.4f}")
-    print(f"  RMSE: {metrics['RMSE']:.4f}")
-    print(f"  R2:   {metrics['R2']:.4f}")
+# Evaluate raw predicted probabilities on training data
+proba = base_classifier.predict_proba(X_train)[:, 1]
+avg_prob = float(np.mean(proba))
+default_pct = float(np.mean(proba >= 0.5) * 100)
+print(f"Average predicted probability for class 1 (training data): {avg_prob:.4f}")
+print(f"% of training rows above default threshold 0.50: {default_pct:.2f}%")
 
-# Step 4: Compare models
-print("\n" + "=" * 60)
-print("STEP 4: Model Comparison")
-print("=" * 60)
+# Histogram of predicted probabilities
+hist, bin_edges = np.histogram(proba, bins=np.linspace(0.0, 1.0, 11))
+print("Predicted probability histogram for class 1:")
+for low, high, count in zip(bin_edges[:-1], bin_edges[1:], hist):
+    print(f"  {low:.2f}-{high:.2f}: {count}")
 
-# Print comparison table
-print("\n{:<20} {:>12} {:>12} {:>12}".format("Model", "MAE", "RMSE", "R2"))
-print("-" * 60)
-for model_name, metrics in models_results.items():
-    print("{:<20} {:>12.4f} {:>12.4f} {:>12.4f}".format(
-        model_name, metrics['MAE'], metrics['RMSE'], metrics['R2']
-    ))
+best_threshold = 0.3
+best_f1 = -1.0
+best_metrics = None
+for threshold in np.arange(0.2, 0.41, 0.05):
+    preds = (proba >= threshold).astype(int)
+    precision = precision_score(y_flag, preds, zero_division=0)
+    recall = recall_score(y_flag, preds, zero_division=0)
+    f1 = f1_score(y_flag, preds, zero_division=0)
+    count_above = int(preds.sum())
+    pct_above = float(count_above / len(proba) * 100)
+    print(
+        f"Threshold {threshold:.2f}: precision={precision:.3f}, recall={recall:.3f}, "
+        f"f1={f1:.3f}, positives={count_above} ({pct_above:.2f}%)"
+    )
+    if f1 > best_f1:
+        best_f1 = f1
+        best_threshold = float(threshold)
+        best_metrics = (precision, recall, f1, pct_above)
 
-# Find best model
-best_model_name = compare_models(models_results)
-best_model = models[best_model_name]
+print(f"Selected tuned threshold: {best_threshold:.2f} (best F1={best_f1:.3f})")
+if best_metrics is not None:
+    print(f"% predictions above tuned threshold: {best_metrics[3]:.2f}%")
 
-print("\n" + "=" * 60)
-print(f"BEST MODEL: {best_model_name}")
-print("=" * 60)
+classifier = ProbabilityThresholdClassifier(
+    base_classifier=base_classifier,
+    threshold=best_threshold
+)
 
-# Step 5: Save best model
-print("\n" + "=" * 60)
-print("STEP 5: Saving Best Model")
-print("=" * 60)
+# Save classifier
+classifier_path = os.path.join(MODEL_DIR, 'classifier.pkl')
+with open(classifier_path, 'wb') as f:
+    pickle.dump(classifier, f)
 
-model_path = os.path.join(MODEL_DIR, 'best_model.pkl')
-save_model(best_model, model_path)
+# Stage 2: Regressor - Predict claim_amount
+print("Training claim amount regressor...")
+# train_claim_amount.csv contains only positive claim rows,
+# so align positive feature rows with positive target rows explicitly.
+positive_mask = y_flag == 1
+X_train_pos = X_train.loc[positive_mask].reset_index(drop=True)
+y_amount_pos = y_amount.reset_index(drop=True)
 
-print("\n" + "=" * 60)
-print("TRAINING COMPLETE!")
-print("=" * 60)
-print(f"\nBest Model: {best_model_name}")
-print(f"R2 Score: {models_results[best_model_name]['R2']:.4f}")
-print(f"Model saved to: {model_path}")
+if X_train_pos.empty or y_amount_pos.empty:
+    raise ValueError('No positive claim rows available for regression training.')
+
+if len(X_train_pos) != len(y_amount_pos):
+    raise ValueError(
+        f"Positive feature rows ({len(X_train_pos)}) and positive target rows "
+        f"({len(y_amount_pos)}) do not match."
+    )
+
+print(f"Positive training rows for regression: {len(X_train_pos)}")
+print(f"Claim amount target sample range: {y_amount_pos.min():.4f} - {y_amount_pos.max():.4f}")
+
+regressor = RandomForestRegressor(
+    n_estimators=100,
+    random_state=42
+)
+regressor.fit(X_train_pos, y_amount_pos)
+
+# Save regressor
+regressor_path = os.path.join(MODEL_DIR, 'regressor.pkl')
+with open(regressor_path, 'wb') as f:
+    pickle.dump(regressor, f)
+
+# Save feature names
+feature_names_path = os.path.join(MODEL_DIR, 'feature_names.txt')
+with open(feature_names_path, 'w') as f:
+    for name in X_train.columns:
+        f.write(name + '\n')
+
+print("Training complete!")
+print(f"Saved classifier to: {classifier_path}")
+print(f"Saved regressor to: {regressor_path}")
+print(f"Saved feature names to: {feature_names_path}")
