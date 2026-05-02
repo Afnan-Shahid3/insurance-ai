@@ -157,37 +157,38 @@ def create_input_dataframe(user_inputs: dict, training_columns: list) -> pd.Data
 
 
 def process_claim(prediction: float, inputs: dict, car_price: float) -> dict:
-    """Run the existing policy engine against the ML prediction."""
+    """Pass ML prediction as reference; policy engine derives payout from vehicle value."""
     denial_flags = DenialFlags(
         dui_dwi=inputs.get("dui_dwi", False),
-        unlicensed_driver=inputs.get("unlicensed_driver", False),
-        expired_license=inputs.get("expired_license", False),
-        excluded_driver=inputs.get("excluded_driver", False),
-        lapse_in_coverage=inputs.get("lapse_in_coverage", False),
-        intentional_damage_or_fraud=inputs.get("intentional_damage_or_fraud", False),
-        commercial_use_undeclared=inputs.get("commercial_use_undeclared", False),
-        racing_or_stunt_driving=inputs.get("racing_or_stunt_driving", False),
-        illegal_activity=inputs.get("illegal_activity", False),
-        non_roadworthy_vehicle=inputs.get("non_roadworthy_vehicle", False),
+        no_valid_license=inputs.get("no_valid_license", False),
+        fraud_or_staged_accident=inputs.get("fraud_or_staged_accident", False),
+        commercial_use_not_covered=inputs.get("commercial_use_not_covered", False),
+        racing_or_illegal_driving=inputs.get("racing_or_illegal_driving", False),
         geographic_exclusion=inputs.get("geographic_exclusion", False),
+        lapse_in_coverage=inputs.get("lapse_in_coverage", False),
+        intentional_damage=inputs.get("intentional_damage", False),
     )
 
     reduction_factors = ReductionFactors(
         comparative_negligence_pct=float(inputs.get("comparative_negligence", 0)),
         overspeeding=inputs.get("overspeeding", False),
         distracted_driving=inputs.get("distracted_driving", False),
+        traffic_violations=inputs.get("traffic_violations", False),
         no_dashcam=inputs.get("no_dashcam_evidence", False),
         failure_to_mitigate=inputs.get("failure_to_mitigate", False),
-        non_oem_parts=inputs.get("non_oem_parts", False),
-        depreciation_pct=float(inputs.get("depreciation", 0)),
+        poor_maintenance=inputs.get("poor_maintenance", False),
+        unauthorized_repair=inputs.get("unauthorized_repair", False),
         salvage_value=float(inputs.get("salvage_value", 0)),
     )
 
     return evaluate_claim(
-        predicted_claim=float(prediction),
+        ml_damage_estimate=float(prediction),
         car_price=float(car_price),
         denial_flags=denial_flags,
         reduction_factors=reduction_factors,
+        incident_type=inputs.get("incident_type", ""),
+        incident_severity=inputs.get("incident_severity", ""),
+        auto_year=int(inputs.get("auto_year", 0)),
     )
 
 
@@ -352,18 +353,15 @@ def main():
     st.markdown("#### Denial Conditions")
     col1, col2 = st.columns(2)
     with col1:
-        dui_dwi = st.checkbox("DUI / DWI", value=False)
-        unlicensed_driver = st.checkbox("Unlicensed driver", value=False)
-        expired_license = st.checkbox("Expired license", value=False)
-        excluded_driver = st.checkbox("Excluded driver", value=False)
-        lapse_in_coverage = st.checkbox("Lapse in coverage", value=False)
+        dui_dwi                    = st.checkbox("DUI / DWI", value=False)
+        no_valid_license           = st.checkbox("No license / expired license", value=False)
+        fraud_or_staged_accident   = st.checkbox("Fraud / staged accident", value=False)
+        lapse_in_coverage          = st.checkbox("Lapse in coverage", value=False)
     with col2:
-        intentional_damage_or_fraud = st.checkbox("Intentional fraud / staged accident", value=False)
-        commercial_use_undeclared = st.checkbox("Commercial use without coverage", value=False)
-        racing_or_stunt_driving = st.checkbox("Racing / stunt driving", value=False)
-        illegal_activity = st.checkbox("Illegal activity during incident", value=False)
-        non_roadworthy_vehicle = st.checkbox("Non-roadworthy vehicle", value=False)
-        geographic_exclusion = st.checkbox("Geographic exclusion", value=False)
+        intentional_damage         = st.checkbox("Intentional damage", value=False)
+        commercial_use_not_covered = st.checkbox("Commercial use not covered", value=False)
+        racing_or_illegal_driving  = st.checkbox("Racing / illegal driving", value=False)
+        geographic_exclusion       = st.checkbox("Geographic exclusion", value=False)
 
     st.markdown("#### Reduction Factors")
     comparative_negligence = st.slider(
@@ -376,20 +374,14 @@ def main():
     )
     col1, col2 = st.columns(2)
     with col1:
-        overspeeding = st.checkbox("Overspeeding", value=False)
+        overspeeding       = st.checkbox("Overspeeding", value=False)
         distracted_driving = st.checkbox("Distracted driving", value=False)
+        traffic_violations = st.checkbox("Traffic violations", value=False)
         no_dashcam_evidence = st.checkbox("No dashcam evidence", value=False)
     with col2:
         failure_to_mitigate = st.checkbox("Failure to mitigate loss", value=False)
-        non_oem_parts = st.checkbox("Non-OEM parts used", value=False)
-    depreciation = st.slider(
-        "Depreciation (% reduction)",
-        min_value=0,
-        max_value=50,
-        value=0,
-        step=5,
-        help="Depreciation/betterment deduction applied to payout."
-    )
+        poor_maintenance    = st.checkbox("Poor vehicle maintenance", value=False)
+        unauthorized_repair = st.checkbox("Unauthorized repair", value=False)
     salvage_value = st.slider(
         "Salvage value deduction ($)",
         min_value=0,
@@ -441,23 +433,21 @@ def main():
             'insured_hobbies': 'reading',
             'car_price': car_price,
             'dui_dwi': dui_dwi,
-            'unlicensed_driver': unlicensed_driver,
-            'expired_license': expired_license,
-            'excluded_driver': excluded_driver,
-            'lapse_in_coverage': lapse_in_coverage,
-            'intentional_damage_or_fraud': intentional_damage_or_fraud,
-            'commercial_use_undeclared': commercial_use_undeclared,
-            'racing_or_stunt_driving': racing_or_stunt_driving,
-            'illegal_activity': illegal_activity,
-            'non_roadworthy_vehicle': non_roadworthy_vehicle,
+            'no_valid_license': no_valid_license,
+            'fraud_or_staged_accident': fraud_or_staged_accident,
+            'commercial_use_not_covered': commercial_use_not_covered,
+            'racing_or_illegal_driving': racing_or_illegal_driving,
             'geographic_exclusion': geographic_exclusion,
+            'lapse_in_coverage': lapse_in_coverage,
+            'intentional_damage': intentional_damage,
             'comparative_negligence': comparative_negligence,
             'overspeeding': overspeeding,
             'distracted_driving': distracted_driving,
+            'traffic_violations': traffic_violations,
             'no_dashcam_evidence': no_dashcam_evidence,
             'failure_to_mitigate': failure_to_mitigate,
-            'non_oem_parts': non_oem_parts,
-            'depreciation': depreciation,
+            'poor_maintenance': poor_maintenance,
+            'unauthorized_repair': unauthorized_repair,
             'salvage_value': salvage_value,
         }
         

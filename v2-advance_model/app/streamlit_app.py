@@ -32,10 +32,19 @@ CLAIM_THRESHOLD = 0.20
 # ----------------------------------------------------------------------
 @st.cache_resource
 def load_classifier(model_path: str):
-    """Handles both dict format {model, threshold} and bare model."""
+    """
+    Load classifier and always extract the underlying base estimator so that
+    predict_proba returns raw float probabilities (not binary threshold outputs).
+    ProbabilityThresholdClassifier stores the RF in .base_classifier.
+    """
     raw = joblib.load(model_path)
     if isinstance(raw, dict) and 'model' in raw:
-        return raw['model'], raw.get('threshold', CLAIM_THRESHOLD)
+        raw = raw['model']
+    # Unwrap ProbabilityThresholdClassifier wrapper to get raw probabilities
+    if hasattr(raw, 'base_classifier'):
+        return raw.base_classifier, CLAIM_THRESHOLD
+    if hasattr(raw, 'estimator'):
+        return raw.estimator, CLAIM_THRESHOLD
     return raw, CLAIM_THRESHOLD
 
 @st.cache_resource
@@ -146,7 +155,7 @@ def apply_modifiers(raw_amount: float, ui: dict) -> Tuple[float, list]:
     rules = [
         ("Accident Severity", SEVERITY_MULT.get(ui.get("accident_severity", "Moderate"), 1.0)),
         ("Dashcam Discount",  0.90 if ui.get("has_dashcam") == "Yes" else 1.0),
-        ("Policy Tier",       TIER_MULT.get(ui.get("policy_tier", "Basic"), 1.0)),
+        # Policy Tier is handled by decision engine loyalty section — not applied here
         ("Your Fault %",      int(ui.get("fault_percentage", 100)) / 100.0),
     ]
 
@@ -292,7 +301,7 @@ st.markdown("---")
 # ======================================================================
 # PREDICT BUTTON
 # ======================================================================
-if st.button("🔍 Calculate Claim", type="primary", use_container_width=True):
+if st.button("🔍 Calculate Claim", type="primary", width='stretch'):
     try:
         ui = {
             "age": age, "gender": gender, "marital_status": marital_status,
@@ -313,19 +322,52 @@ if st.button("🔍 Calculate Claim", type="primary", use_container_width=True):
         input_df = build_feature_row(ui, training_columns)
 
         # Step 2 — classifier
-        proba = float(clf.predict_proba(input_df)[0][1])
+        # Defensive: try predict_proba; if it returns integers, unwrap base estimator
+        raw_proba_output = clf.predict_proba(input_df)
+        proba = float(raw_proba_output[0][1])
+
+        # If the wrapper returned binary 0/1 instead of a float probability,
+        # try to reach the underlying RandomForest directly
+        if proba in (0.0, 1.0):
+            base = None
+            for attr in ('base_classifier', 'base_estimator', 'estimator', '_clf'):
+                if hasattr(clf, attr):
+                    base = getattr(clf, attr)
+                    break
+            if base is not None and hasattr(base, 'predict_proba'):
+                raw_proba_output = base.predict_proba(input_df)
+                proba = float(raw_proba_output[0][1])
+
         flag  = int(proba >= CLAIM_THRESHOLD)
 
         # Step 3 — regressor (only if flagged)
         raw_amount = 0.0
         if flag == 1:
-            raw_amount = max(0.0, float(np.expm1(reg.predict(input_df)[0])))
+            log_pred = reg.predict(input_df)[0]
+            raw_amount = max(0.0, float(np.expm1(log_pred)))
 
         # Step 4 — accident modifiers
         adjusted_amount, mod_breakdown = apply_modifiers(raw_amount, ui)
 
+        # ── LIVE DEBUG (always visible — remove once working) ──
+        with st.expander("🛠️ LIVE DEBUG — click to diagnose zero output", expanded=True):
+            st.write("**Classifier type:**", type(clf).__name__)
+            st.write("**predict_proba output:**", raw_proba_output)
+            st.write(f"**Raw probability (class 1):** {proba:.6f}")
+            st.write(f"**Threshold:** {CLAIM_THRESHOLD}  |  **Flag:** {flag}")
+            st.write(f"**Raw ML amount (before modifiers):** ${raw_amount:,.2f}")
+            st.write(f"**After apply_modifiers:** ${adjusted_amount:,.2f}")
+            st.write("**Non-zero input features:**")
+            nonzero_feats = input_df.loc[:, (input_df != 0).any()].T
+            st.dataframe(nonzero_feats)
+            if hasattr(clf, '__dict__'):
+                st.write("**Classifier attributes:**", list(vars(clf).keys()))
+
         # Step 5 — decision engine
+        # IMPORTANT: fault/dashcam/severity/tier are already applied in apply_modifiers above.
+        # Pass ONLY denial flags and loyalty fields here to avoid double-applying reductions.
         decision_input = {
+            # --- Denial conditions ---
             "DUI":                  False,
             "valid_license":        license_revoked == "No",
             "fraud_indicator":      False,
@@ -337,15 +379,17 @@ if st.button("🔍 Calculate Claim", type="primary", use_container_width=True):
             "street_racing":        False,
             "roadworthy":           True,
             "geographic_exclusion": False,
-            "fault_percentage":     fault_percentage,
-            "speeding_penalty":     mvr_pts * 5,
+            # --- Reductions: set to 0/False so engine does NOT re-apply them ---
+            "fault_percentage":     0,       # already applied in apply_modifiers
+            "speeding_penalty":     0,       # excluded (not a UI input)
             "distracted_driving":   False,
-            "dashcam":              has_dashcam == "Yes",
+            "dashcam":              True,    # set True so engine skips no-dashcam penalty (already applied)
             "failure_to_mitigate":  False,
             "preexisting_damage_pct": 0,
-            "depreciation_pct":     min(car_age * 2, 40),
+            "depreciation_pct":     0,       # excluded — not surfaced in UI
             "salvage_value":        0,
             "oem_parts":            True,
+            # --- Loyalty / CRM (engine handles these — not in apply_modifiers) ---
             "policy_tier":          policy_tier,
             "customer_tenure":      customer_tenure,
             "previous_claims":      prior_claims,
@@ -426,7 +470,7 @@ like this one have a below-average risk level.
         with st.expander("🔍 Debug — Feature Row Sent to Model"):
             st.caption(f"Shape: {input_df.shape} | Non-zero: {int((input_df != 0).sum().sum())} features")
             nonzero = input_df.loc[:, (input_df != 0).any()].T.rename(columns={0: "value"})
-            st.dataframe(nonzero, use_container_width=True)
+            st.dataframe(nonzero, width='stretch')
 
     except Exception as exc:
         st.error(f"Prediction failed: {exc}")
