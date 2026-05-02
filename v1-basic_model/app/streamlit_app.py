@@ -8,6 +8,17 @@ import pandas as pd
 import pickle
 import numpy as np
 import os
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+from src.policy_engine.insurance_rules import (
+    DenialFlags,
+    ReductionFactors,
+    evaluate_claim,
+)
 
 # Page configuration
 st.set_page_config(
@@ -31,7 +42,8 @@ def load_model(model_path: str):
 
 def load_training_columns():
     """Load the feature column names from training data."""
-    train_features = pd.read_csv("data/processed/train_features.csv")
+    train_features_path = BASE_DIR / "data" / "processed" / "train_features.csv"
+    train_features = pd.read_csv(train_features_path)
     return train_features.columns.tolist()
 
 
@@ -144,6 +156,41 @@ def create_input_dataframe(user_inputs: dict, training_columns: list) -> pd.Data
     return df
 
 
+def process_claim(prediction: float, inputs: dict, car_price: float) -> dict:
+    """Run the existing policy engine against the ML prediction."""
+    denial_flags = DenialFlags(
+        dui_dwi=inputs.get("dui_dwi", False),
+        unlicensed_driver=inputs.get("unlicensed_driver", False),
+        expired_license=inputs.get("expired_license", False),
+        excluded_driver=inputs.get("excluded_driver", False),
+        lapse_in_coverage=inputs.get("lapse_in_coverage", False),
+        intentional_damage_or_fraud=inputs.get("intentional_damage_or_fraud", False),
+        commercial_use_undeclared=inputs.get("commercial_use_undeclared", False),
+        racing_or_stunt_driving=inputs.get("racing_or_stunt_driving", False),
+        illegal_activity=inputs.get("illegal_activity", False),
+        non_roadworthy_vehicle=inputs.get("non_roadworthy_vehicle", False),
+        geographic_exclusion=inputs.get("geographic_exclusion", False),
+    )
+
+    reduction_factors = ReductionFactors(
+        comparative_negligence_pct=float(inputs.get("comparative_negligence", 0)),
+        overspeeding=inputs.get("overspeeding", False),
+        distracted_driving=inputs.get("distracted_driving", False),
+        no_dashcam=inputs.get("no_dashcam_evidence", False),
+        failure_to_mitigate=inputs.get("failure_to_mitigate", False),
+        non_oem_parts=inputs.get("non_oem_parts", False),
+        depreciation_pct=float(inputs.get("depreciation", 0)),
+        salvage_value=float(inputs.get("salvage_value", 0)),
+    )
+
+    return evaluate_claim(
+        predicted_claim=float(prediction),
+        car_price=float(car_price),
+        denial_flags=denial_flags,
+        reduction_factors=reduction_factors,
+    )
+
+
 # =============================================================================
 # MAIN APP
 # =============================================================================
@@ -161,16 +208,16 @@ def main():
     st.divider()
     
     # Check if model exists
-    model_path = "models/saved_models/best_model.pkl"
+    model_path = BASE_DIR / "models" / "saved_models" / "best_model.pkl"
     
-    if not os.path.exists(model_path):
+    if not model_path.exists():
         st.error(f"Model not found at {model_path}. Please run training first!")
         st.info("Run: python scripts/03_train_model.py")
         return
     
     # Load model and training columns
     try:
-        model = load_model(model_path)
+        model = load_model(str(model_path))
         training_columns = load_training_columns()
     except Exception as e:
         st.error(f"Error loading model: {e}")
@@ -292,7 +339,66 @@ def main():
             max_value=3,
             value=1
         )
-    
+
+    st.markdown("### 🛡️ Policy Engine Inputs")
+    car_price = st.number_input(
+        "Vehicle Purchase Price ($)",
+        min_value=0,
+        value=25000,
+        step=500,
+        help="Used to cap the final payout at a percentage of the vehicle value."
+    )
+
+    st.markdown("#### Denial Conditions")
+    col1, col2 = st.columns(2)
+    with col1:
+        dui_dwi = st.checkbox("DUI / DWI", value=False)
+        unlicensed_driver = st.checkbox("Unlicensed driver", value=False)
+        expired_license = st.checkbox("Expired license", value=False)
+        excluded_driver = st.checkbox("Excluded driver", value=False)
+        lapse_in_coverage = st.checkbox("Lapse in coverage", value=False)
+    with col2:
+        intentional_damage_or_fraud = st.checkbox("Intentional fraud / staged accident", value=False)
+        commercial_use_undeclared = st.checkbox("Commercial use without coverage", value=False)
+        racing_or_stunt_driving = st.checkbox("Racing / stunt driving", value=False)
+        illegal_activity = st.checkbox("Illegal activity during incident", value=False)
+        non_roadworthy_vehicle = st.checkbox("Non-roadworthy vehicle", value=False)
+        geographic_exclusion = st.checkbox("Geographic exclusion", value=False)
+
+    st.markdown("#### Reduction Factors")
+    comparative_negligence = st.slider(
+        "Comparative negligence (% fault)",
+        min_value=0,
+        max_value=100,
+        value=0,
+        step=5,
+        help="Percent fault assigned to the claimant."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        overspeeding = st.checkbox("Overspeeding", value=False)
+        distracted_driving = st.checkbox("Distracted driving", value=False)
+        no_dashcam_evidence = st.checkbox("No dashcam evidence", value=False)
+    with col2:
+        failure_to_mitigate = st.checkbox("Failure to mitigate loss", value=False)
+        non_oem_parts = st.checkbox("Non-OEM parts used", value=False)
+    depreciation = st.slider(
+        "Depreciation (% reduction)",
+        min_value=0,
+        max_value=50,
+        value=0,
+        step=5,
+        help="Depreciation/betterment deduction applied to payout."
+    )
+    salvage_value = st.slider(
+        "Salvage value deduction ($)",
+        min_value=0,
+        max_value=10000,
+        value=0,
+        step=100,
+        help="Flat salvage deduction from the payout."
+    )
+
     # =============================================================================
     # PREDICTION
     # =============================================================================
@@ -332,7 +438,27 @@ def main():
             'authorities_contacted': 'Police',
             'collision_type': 'Rear Collision',
             'insured_relationship': '_husband',
-            'insured_hobbies': 'reading'
+            'insured_hobbies': 'reading',
+            'car_price': car_price,
+            'dui_dwi': dui_dwi,
+            'unlicensed_driver': unlicensed_driver,
+            'expired_license': expired_license,
+            'excluded_driver': excluded_driver,
+            'lapse_in_coverage': lapse_in_coverage,
+            'intentional_damage_or_fraud': intentional_damage_or_fraud,
+            'commercial_use_undeclared': commercial_use_undeclared,
+            'racing_or_stunt_driving': racing_or_stunt_driving,
+            'illegal_activity': illegal_activity,
+            'non_roadworthy_vehicle': non_roadworthy_vehicle,
+            'geographic_exclusion': geographic_exclusion,
+            'comparative_negligence': comparative_negligence,
+            'overspeeding': overspeeding,
+            'distracted_driving': distracted_driving,
+            'no_dashcam_evidence': no_dashcam_evidence,
+            'failure_to_mitigate': failure_to_mitigate,
+            'non_oem_parts': non_oem_parts,
+            'depreciation': depreciation,
+            'salvage_value': salvage_value,
         }
         
         # Create input DataFrame
@@ -341,6 +467,11 @@ def main():
         # Make prediction
         try:
             predicted_cost = model.predict(input_df)[0]
+            policy_result = process_claim(predicted_cost, user_inputs, car_price)
+            final_payout = policy_result['final_payout']
+            denied = policy_result['denied']
+            denial_reason = policy_result['denial_reason']
+            adjustments = policy_result['adjustments']
             
             # Get risk level
             risk_level, risk_color = get_risk_level(predicted_cost)
@@ -355,6 +486,26 @@ def main():
                 <h1 style="margin: 10px 0; color: #2ecc71;">${predicted_cost:,.2f}</h1>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Final payout
+            st.markdown(f"""
+            <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; text-align: center; border: 1px solid #dcdcdc;">
+                <h2 style="margin: 0; color: #ff7f0e;">Final Payout</h2>
+                <h1 style="margin: 10px 0; color: #d62728;">${final_payout:,.2f}</h1>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if denied:
+                st.error(f"Denied: {denial_reason}")
+            else:
+                st.success("Claim approved subject to policy engine adjustments.")
+
+            if adjustments:
+                st.markdown("### 🔧 Policy Adjustments Applied")
+                for adjustment in adjustments:
+                    st.write(f"• {adjustment['description']}")
+            else:
+                st.info("No policy adjustments were applied.")
             
             # Risk level
             st.markdown(f"""
