@@ -18,6 +18,7 @@ from src.policy_engine.insurance_rules import (
     DenialFlags,
     ReductionFactors,
     evaluate_claim,
+    apply_depreciation,
 )
 
 # Page configuration
@@ -163,7 +164,8 @@ def process_claim(prediction: float, inputs: dict) -> dict:
         1. base_payout = ML prediction
         2. Denial check — any True flag → final_payout = 0, pipeline stops
         3. Reduction engine — multiplicative penalties applied to base_payout
-        4. Return structured result
+        4. Depreciation — compound 5%/yr applied to post-reduction payout
+        5. Return structured result
 
     Args:
         prediction: Raw ML model output in dollars — used directly as base payout.
@@ -201,14 +203,33 @@ def process_claim(prediction: float, inputs: dict) -> dict:
         salvage_value=float(inputs.get("salvage_value", 0)),
     )
 
+    # Steps 1–3: base payout, denial check, reductions
     result = evaluate_claim(
         ml_damage_estimate=float(prediction),
         denial_flags=denial_flags,
         reduction_factors=reduction_factors,
     )
 
+    # Step 4: depreciation applied on post-reduction payout only
+    if not result["denied"]:
+        auto_year = int(inputs.get("auto_year", 0))
+        age_years = max(0, 2026 - auto_year) if auto_year > 0 else 0
+        depreciated_payout = apply_depreciation(result["final_payout"], age_years)
+        result["adjustments"].append({
+            "rule":          "depreciation",
+            "description":   f"Compound depreciation: {age_years} yr at 5%/yr "
+                             f"(0.95^{age_years}) → "
+                             f"${result['final_payout']:,.2f} × "
+                             f"{0.95 ** age_years:.6f} = ${depreciated_payout:,.2f}.",
+            "payout_before": result["final_payout"],
+            "payout_after":  depreciated_payout,
+        })
+        final_payout = depreciated_payout
+    else:
+        final_payout = 0.0
+
     return {
-        "final_payout": result["final_payout"],
+        "final_payout": final_payout,
         "base_payout":  result["ml_damage_estimate"],
         "denied":       result["denied"],
         "reason":       result["denial_reason"],
@@ -349,22 +370,6 @@ def main():
         ["Trivial Damage", "Minor Damage", "Major Damage", "Total Loss"]
     )
     
-    col1, col2 = st.columns(2)
-    with col1:
-        bodily_injuries = st.slider(
-            "Bodily Injuries",
-            min_value=0,
-            max_value=5,
-            value=0
-        )
-    with col2:
-        witnesses = st.slider(
-            "Witnesses",
-            min_value=0,
-            max_value=3,
-            value=1
-        )
-
     st.markdown("### Policy Engine Inputs")
 
     st.markdown("#### Denial Conditions")
@@ -430,8 +435,6 @@ def main():
             'auto_year': auto_year,
             'incident_type': incident_type,
             'incident_severity': incident_severity,
-            'bodily_injuries': bodily_injuries,
-            'witnesses': witnesses,
             'capital-gains': 0,
             'capital-loss': 0,
             'insured_zip': 12345,

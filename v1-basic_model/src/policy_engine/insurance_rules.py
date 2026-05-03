@@ -143,6 +143,36 @@ def _pct_reduction(
 
 
 # =============================================================================
+# DEPRECIATION
+# =============================================================================
+
+def apply_depreciation(amount: float, age_years: int) -> float:
+    """
+    Apply compound depreciation at 5% per year.
+
+    Formula: final_amount = amount * (0.95 ** age_years)
+
+    Each year reduces the remaining value by 5% of that year's value,
+    NOT 5% of the original — making this compound, not linear.
+
+    Args:
+        amount:     The base amount in dollars to depreciate.
+        age_years:  Vehicle age in years. Negative values are treated as 0.
+
+    Returns:
+        Depreciated amount rounded to 2 decimal places.
+
+    Examples:
+        apply_depreciation(10000, 0)  → 10000.00  (no depreciation)
+        apply_depreciation(10000, 1)  →  9500.00  (5% off)
+        apply_depreciation(10000, 2)  →  9025.00  (5% off 9500, not 5% off 10000 twice)
+        apply_depreciation(10000, 10) →  5987.37
+    """
+    age_years = max(0, age_years)
+    return round(amount * (0.95 ** age_years), 2)
+
+
+# =============================================================================
 # RULE B — DENIAL ENGINE
 # =============================================================================
 
