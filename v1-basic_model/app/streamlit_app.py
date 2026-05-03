@@ -23,7 +23,6 @@ from src.policy_engine.insurance_rules import (
 # Page configuration
 st.set_page_config(
     page_title="Insurance Claim Predictor",
-    page_icon="🏥",
     layout="centered"
 )
 
@@ -223,7 +222,7 @@ def process_claim(prediction: float, inputs: dict) -> dict:
 
 def main():
     # Title and description
-    st.title("🏥 Insurance Claim Cost Predictor")
+    st.title("Insurance Claim Cost Predictor")
     st.markdown("""
     **AI-Powered Insurance Claim Prediction System**
     
@@ -256,10 +255,10 @@ def main():
     # INPUT FORM
     # =============================================================================
     
-    st.subheader("📋 Enter Claim Details")
+    st.subheader("Enter Claim Details")
     
     # Customer Information
-    st.markdown("### 👤 Customer Information")
+    st.markdown("### Customer Information")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -296,7 +295,7 @@ def main():
     )
     
     # Policy Information
-    st.markdown("### 📄 Policy Information")
+    st.markdown("### Policy Information")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -320,7 +319,7 @@ def main():
     )
     
     # Vehicle Information
-    st.markdown("### 🚗 Vehicle Information")
+    st.markdown("### Vehicle Information")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -338,7 +337,7 @@ def main():
         )
     
     # Incident Information
-    st.markdown("### 🚨 Incident Information")
+    st.markdown("### Incident Information")
     
     incident_type = st.selectbox(
         "Incident Type",
@@ -366,7 +365,7 @@ def main():
             value=1
         )
 
-    st.markdown("### 🛡️ Policy Engine Inputs")
+    st.markdown("### Policy Engine Inputs")
 
     st.markdown("#### Denial Conditions")
     col1, col2 = st.columns(2)
@@ -416,7 +415,7 @@ def main():
     st.divider()
     
     # Predict button
-    if st.button("🔮 Predict Claim Cost", type="primary"):
+    if st.button("Predict Claim Cost", type="primary"):
         # Collect all inputs into a dictionary
         user_inputs = {
             'months_as_customer': months_as_customer,
@@ -484,7 +483,7 @@ def main():
             risk_level, risk_color = get_risk_level(predicted_cost)
             
             # Display results
-            st.subheader("📊 Prediction Results")
+            st.subheader("Prediction Results")
             
             # Predicted cost
             st.markdown(f"""
@@ -508,7 +507,7 @@ def main():
                 st.success("Claim approved subject to policy engine adjustments.")
 
             if adjustments:
-                st.markdown("### 🔧 Policy Adjustments Applied")
+                st.markdown("### Policy Adjustments Applied")
                 for adjustment in adjustments:
                     st.write(f"• {adjustment['description']}")
             else:
@@ -522,7 +521,7 @@ def main():
             """, unsafe_allow_html=True)
             
             # Explanation
-            st.subheader("💡 Explanation")
+            st.subheader("Explanation")
             st.markdown("""
             **Key factors that influence this prediction:**
             
@@ -538,7 +537,7 @@ def main():
             for idx, row in importance_df.iterrows():
                 st.write(f"• **{row['feature']}** (importance: {row['importance']*100:.2f}%)")
             
-            st.info("💡 The model uses machine learning to analyze patterns in historical insurance claims to predict the expected cost.")
+            st.info("The model uses machine learning to analyze patterns in historical insurance claims to predict the expected cost.")
             
         except Exception as e:
             st.error(f"Error making prediction: {e}")
