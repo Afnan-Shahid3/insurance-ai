@@ -26,7 +26,6 @@ env/
 *.joblib
 
 # Keep structure but ignore heavy model files
-v1-basic-model/models/
 v2-advanced-engine/models/
 
 # =========================

@@ -156,8 +156,29 @@ def create_input_dataframe(user_inputs: dict, training_columns: list) -> pd.Data
     return df
 
 
-def process_claim(prediction: float, inputs: dict, car_price: float) -> dict:
-    """Pass ML prediction as reference; policy engine derives payout from vehicle value."""
+def process_claim(prediction: float, inputs: dict) -> dict:
+    """
+    Run the full claim pipeline against the ML prediction.
+
+    Pipeline:
+        1. base_payout = ML prediction
+        2. Denial check — any True flag → final_payout = 0, pipeline stops
+        3. Reduction engine — multiplicative penalties applied to base_payout
+        4. Return structured result
+
+    Args:
+        prediction: Raw ML model output in dollars — used directly as base payout.
+        inputs:     Flat dict of denial flags, reduction factors, and their values.
+
+    Returns:
+        {
+            "final_payout": float,
+            "base_payout":  float,
+            "denied":       bool,
+            "reason":       str | None,
+            "adjustments":  list[dict],
+        }
+    """
     denial_flags = DenialFlags(
         dui_dwi=inputs.get("dui_dwi", False),
         no_valid_license=inputs.get("no_valid_license", False),
@@ -181,15 +202,19 @@ def process_claim(prediction: float, inputs: dict, car_price: float) -> dict:
         salvage_value=float(inputs.get("salvage_value", 0)),
     )
 
-    return evaluate_claim(
+    result = evaluate_claim(
         ml_damage_estimate=float(prediction),
-        car_price=float(car_price),
         denial_flags=denial_flags,
         reduction_factors=reduction_factors,
-        incident_type=inputs.get("incident_type", ""),
-        incident_severity=inputs.get("incident_severity", ""),
-        auto_year=int(inputs.get("auto_year", 0)),
     )
+
+    return {
+        "final_payout": result["final_payout"],
+        "base_payout":  result["ml_damage_estimate"],
+        "denied":       result["denied"],
+        "reason":       result["denial_reason"],
+        "adjustments":  result["adjustments"],
+    }
 
 
 # =============================================================================
@@ -342,13 +367,6 @@ def main():
         )
 
     st.markdown("### 🛡️ Policy Engine Inputs")
-    car_price = st.number_input(
-        "Vehicle Purchase Price ($)",
-        min_value=0,
-        value=25000,
-        step=500,
-        help="Used to cap the final payout at a percentage of the vehicle value."
-    )
 
     st.markdown("#### Denial Conditions")
     col1, col2 = st.columns(2)
@@ -374,9 +392,9 @@ def main():
     )
     col1, col2 = st.columns(2)
     with col1:
-        overspeeding       = st.checkbox("Overspeeding", value=False)
-        distracted_driving = st.checkbox("Distracted driving", value=False)
-        traffic_violations = st.checkbox("Traffic violations", value=False)
+        overspeeding        = st.checkbox("Overspeeding", value=False)
+        distracted_driving  = st.checkbox("Distracted driving", value=False)
+        traffic_violations  = st.checkbox("Traffic violations", value=False)
         no_dashcam_evidence = st.checkbox("No dashcam evidence", value=False)
     with col2:
         failure_to_mitigate = st.checkbox("Failure to mitigate loss", value=False)
@@ -431,7 +449,6 @@ def main():
             'collision_type': 'Rear Collision',
             'insured_relationship': '_husband',
             'insured_hobbies': 'reading',
-            'car_price': car_price,
             'dui_dwi': dui_dwi,
             'no_valid_license': no_valid_license,
             'fraud_or_staged_accident': fraud_or_staged_accident,
@@ -457,11 +474,11 @@ def main():
         # Make prediction
         try:
             predicted_cost = model.predict(input_df)[0]
-            policy_result = process_claim(predicted_cost, user_inputs, car_price)
-            final_payout = policy_result['final_payout']
-            denied = policy_result['denied']
-            denial_reason = policy_result['denial_reason']
-            adjustments = policy_result['adjustments']
+            policy_result  = process_claim(predicted_cost, user_inputs)
+            final_payout   = policy_result['final_payout']
+            denied         = policy_result['denied']
+            denial_reason  = policy_result['reason']
+            adjustments    = policy_result['adjustments']
             
             # Get risk level
             risk_level, risk_color = get_risk_level(predicted_cost)

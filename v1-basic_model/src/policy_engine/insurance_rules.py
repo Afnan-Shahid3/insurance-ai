@@ -3,16 +3,11 @@ Insurance Policy Rules Engine
 Pure rule-based module — no ML, no dataset dependency.
 
 Pipeline:
-    ml_damage_estimate (from ML model — reference only)
+    ml_damage_estimate (from ML model — used directly as base payout)
         → Rule B: Denial check  (any flag → payout = 0, pipeline stops immediately)
-        → Depreciation          (car_price × age → depreciated_car_value)
-        → Step 0: Base payout   (depreciated_car_value × severity multiplier;
-                                 theft / total-loss → 100%)
-        → Rule A: Car price cap  (cap at % of depreciated_car_value)
         → Dashcam trigger        (no_dashcam=True forces overspeeding +
                                   distracted_driving + failure_to_mitigate on)
         → Rule C: Reductions     (multipliers + salvage deduction)
-        → Final payout cap       (hard ceiling: final_payout_cap_pct % of original car_price)
         → final_payout
 
 Usage:
@@ -22,11 +17,8 @@ Usage:
 
     result = evaluate_claim(
         ml_damage_estimate=45000.0,
-        car_price=30000.0,
         denial_flags=DenialFlags(lapse_in_coverage=True),
         reduction_factors=ReductionFactors(),
-        incident_type="Single Vehicle Collision",
-        incident_severity="Major Damage",
     )
     # result["denied"] → True
     # result["final_payout"] → 0.0
@@ -34,7 +26,6 @@ Usage:
 
 import dataclasses
 from dataclasses import dataclass
-from datetime import date
 from typing import Optional
 
 
@@ -48,9 +39,6 @@ class PolicyConfig:
     Configurable thresholds and penalty rates for the rules engine.
     Override any field to customise behaviour without touching rule logic.
     """
-    # Rule A
-    car_price_cap_pct: float = 70.0             # max payout as % of car market value
-
     # Rule C — penalty percentages (0-100); applied multiplicatively to running payout
     overspeeding_penalty_pct:       float = 20.0
     distracted_driving_penalty_pct: float = 15.0
@@ -59,20 +47,6 @@ class PolicyConfig:
     failure_to_mitigate_penalty_pct: float = 5.0
     poor_maintenance_penalty_pct:   float = 15.0
     unauthorized_repair_penalty_pct: float = 5.0
-
-    # Base payout — severity multipliers (fraction of depreciated car value, 0.0–1.0)
-    # Total loss and theft always use 1.0 — handled explicitly in _compute_base_payout
-    trivial_damage_multiplier: float = 0.08   # cosmetic / no structural damage
-    minor_damage_multiplier: float = 0.25     # single panel / airbags not deployed
-    major_damage_multiplier: float = 0.65     # structural damage / airbags deployed
-
-    # Depreciation — derives depreciated_car_value from car_price and vehicle age
-    depreciation_rate_per_year: float = 10.0  # % of original value lost per year
-    max_depreciation_pct: float = 70.0         # depreciation cannot exceed this cap
-
-    # Final payout cap — hard ceiling applied after ALL reductions
-    # References the original car_price, not the depreciated value
-    final_payout_cap_pct: float = 70.0
 
 
 # =============================================================================
@@ -129,7 +103,6 @@ class ReductionFactors:
 
     comparative_negligence_pct accepts values 0-100.
     salvage_value is a flat dollar amount deducted last.
-    Depreciation is NOT here — it is computed from vehicle age in PolicyConfig.
     """
     # Proportional fault — e.g., 30.0 means driver is 30% at fault
     comparative_negligence_pct: float = 0.0
@@ -167,166 +140,6 @@ def _pct_reduction(
         "payout_after": round(after, 2),
     })
     return after
-
-
-# =============================================================================
-# RULE A — CAR PRICE CAP
-# =============================================================================
-
-def _apply_car_price_cap(
-    claim: float,
-    depreciated_car_value: float,
-    cap_pct: float,
-    adjustments: list,
-) -> float:
-    """
-    Cap the claim so payout cannot exceed cap_pct% of the depreciated car value.
-    Skipped when depreciated_car_value <= 0 (value unknown / not applicable).
-    """
-    if depreciated_car_value <= 0:
-        return claim
-
-    cap_amount = depreciated_car_value * (cap_pct / 100.0)
-    if claim > cap_amount:
-        adjustments.append({
-            "rule": "car_price_cap",
-            "description": (
-                f"Claim ${claim:,.2f} exceeds {cap_pct:.0f}% of depreciated car value "
-                f"(${depreciated_car_value:,.2f} × {cap_pct:.0f}% = ${cap_amount:,.2f}). "
-                f"Capped at ${cap_amount:,.2f}."
-            ),
-            "payout_before": round(claim, 2),
-            "payout_after": round(cap_amount, 2),
-        })
-        return cap_amount
-
-    return claim
-
-
-# =============================================================================
-# DEPRECIATION
-# =============================================================================
-
-def _compute_depreciated_car_value(
-    car_price: float,
-    auto_year: int,
-    config: "PolicyConfig",
-) -> tuple[float, dict]:
-    """
-    Compute the depreciated car value from original price and vehicle age.
-
-    Rules:
-        - 10% of original value lost per year (config.depreciation_rate_per_year)
-        - Depreciation is capped at 70% (config.max_depreciation_pct)
-        - Minimum retained value = car_price × (1 − max_depreciation_pct / 100)
-
-    Returns (depreciated_car_value, audit_entry).
-    If auto_year is unknown (≤ 0) or car_price is 0, returns car_price unchanged.
-    """
-    if car_price <= 0 or auto_year <= 0:
-        return float(car_price), {
-            "rule": "depreciation",
-            "description": "Vehicle price or year not provided — depreciation skipped.",
-            "payout_before": round(float(car_price), 2),
-            "payout_after":  round(float(car_price), 2),
-        }
-
-    current_year    = date.today().year
-    age_years       = max(0, current_year - auto_year)
-    raw_dep_pct     = age_years * config.depreciation_rate_per_year
-    dep_pct         = min(raw_dep_pct, config.max_depreciation_pct)
-    depreciated_val = round(car_price * (1.0 - dep_pct / 100.0), 2)
-
-    return depreciated_val, {
-        "rule": "depreciation",
-        "description": (
-            f"Vehicle age {age_years} yr × {config.depreciation_rate_per_year:.0f}%/yr "
-            f"= {raw_dep_pct:.0f}% (capped at {config.max_depreciation_pct:.0f}%) → "
-            f"${car_price:,.2f} × {100.0 - dep_pct:.0f}% = ${depreciated_val:,.2f}."
-        ),
-        "payout_before": round(float(car_price), 2),
-        "payout_after":  depreciated_val,
-    }
-
-
-# =============================================================================
-# BASE PAYOUT COMPUTATION
-# =============================================================================
-
-def _compute_base_payout(
-    incident_type: str,
-    incident_severity: str,
-    depreciated_car_value: float,
-    ml_damage_estimate: float,
-    config: "PolicyConfig",
-) -> tuple[float, dict]:
-    """
-    Determine the policy base payout from the pre-computed depreciated car value
-    and incident characteristics.
-    The ML damage estimate is passed solely for audit contrast — never used in computation.
-
-    Theft / Total Loss  → base = depreciated_car_value (100%)
-    Other severities    → base = severity_multiplier × depreciated_car_value
-    Fallback (unknown)  → base = ml_damage_estimate (with audit note)
-    """
-    norm_type     = incident_type.strip().lower()
-    norm_severity = incident_severity.strip().lower()
-
-    is_theft      = norm_type == "vehicle theft"
-    is_total_loss = norm_severity == "total loss"
-
-    if is_theft or is_total_loss:
-        basis = "theft" if is_theft else "total_loss"
-        if depreciated_car_value <= 0:
-            return float(ml_damage_estimate), {
-                "rule": "base_payout_computation",
-                "description": (
-                    f"{basis.replace('_', ' ').title()}: depreciated vehicle value is zero. "
-                    f"Falling back to ML damage estimate ${ml_damage_estimate:,.2f}."
-                ),
-                "payout_before": round(float(ml_damage_estimate), 2),
-                "payout_after":  round(float(ml_damage_estimate), 2),
-            }
-        return depreciated_car_value, {
-            "rule": "base_payout_computation",
-            "description": (
-                f"{basis.replace('_', ' ').title()}: base = full depreciated vehicle value "
-                f"${depreciated_car_value:,.2f}. "
-                f"ML estimate ${ml_damage_estimate:,.2f} is reference only."
-            ),
-            "payout_before": round(float(ml_damage_estimate), 2),
-            "payout_after":  round(depreciated_car_value, 2),
-        }
-
-    severity_map = {
-        "trivial damage": config.trivial_damage_multiplier,
-        "minor damage":   config.minor_damage_multiplier,
-        "major damage":   config.major_damage_multiplier,
-    }
-    multiplier = severity_map.get(norm_severity)
-
-    if multiplier is None or depreciated_car_value <= 0:
-        return float(ml_damage_estimate), {
-            "rule": "base_payout_computation",
-            "description": (
-                f"Severity '{incident_severity}' (depreciated value unavailable or unrecognised): "
-                f"using ML damage estimate ${ml_damage_estimate:,.2f} as base."
-            ),
-            "payout_before": round(float(ml_damage_estimate), 2),
-            "payout_after":  round(float(ml_damage_estimate), 2),
-        }
-
-    base = round(max(0.0, depreciated_car_value * multiplier), 2)
-    return base, {
-        "rule": "base_payout_computation",
-        "description": (
-            f"{incident_severity}: {multiplier * 100:.0f}% of depreciated value "
-            f"(${depreciated_car_value:,.2f} × {multiplier * 100:.0f}% = ${base:,.2f}). "
-            f"ML estimate ${ml_damage_estimate:,.2f} is reference only."
-        ),
-        "payout_before": round(float(ml_damage_estimate), 2),
-        "payout_after":  base,
-    }
 
 
 # =============================================================================
@@ -520,91 +333,39 @@ def _apply_reductions(
 
 
 # =============================================================================
-# FINAL PAYOUT CAP
-# =============================================================================
-
-def _apply_final_payout_cap(
-    claim: float,
-    car_price: float,
-    cap_pct: float,
-    adjustments: list,
-) -> float:
-    """
-    Hard ceiling on the final payout — applied as the LAST step in the pipeline,
-    after all reductions have been applied.
-
-    Cap = car_price × cap_pct / 100  (references original car price, not depreciated).
-    Skipped when car_price <= 0.
-    """
-    if car_price <= 0:
-        return claim
-
-    ceiling = round(car_price * cap_pct / 100.0, 2)
-    if claim > ceiling:
-        adjustments.append({
-            "rule":          "final_payout_cap",
-            "description":   (
-                f"Final payout ${claim:,.2f} exceeds {cap_pct:.0f}% of original car price "
-                f"(${car_price:,.2f} × {cap_pct:.0f}% = ${ceiling:,.2f}). "
-                f"Capped at ${ceiling:,.2f}."
-            ),
-            "payout_before": round(claim, 2),
-            "payout_after":  ceiling,
-        })
-        return ceiling
-
-    return claim
-
-
-# =============================================================================
 # PUBLIC API — single entry point
 # =============================================================================
 
 def evaluate_claim(
     ml_damage_estimate: float,
-    car_price: float,
     denial_flags: DenialFlags,
     reduction_factors: ReductionFactors,
-    incident_type: str = "",
-    incident_severity: str = "",
-    auto_year: int = 0,
     config: Optional[PolicyConfig] = None,
 ) -> dict:
     """
-    Run the full insurance policy rules engine.
+    Run the insurance policy rules engine.
 
-    ml_damage_estimate is the raw ML model output — stored in the result for
-    reference only.  All downstream calculations use depreciated_car_value,
-    which is computed from car_price and auto_year before any other rule runs.
+    ml_damage_estimate is the ML model output and is used directly as the base
+    payout. Denial rules are checked first; if the claim is not denied, reduction
+    rules are applied sequentially to produce the final payout.
 
     Execution order:
-        B. Denial check    → ANY flag True → payout = 0, pipeline stops immediately
-        D. Depreciation    → depreciated_car_value = car_price × (1 − age×rate),
-                             capped at config.max_depreciation_pct
-        0. Base payout     → depreciated_car_value × severity multiplier
-                             (theft / total-loss → 100% of depreciated value)
-        A. Car price cap   → payout ≤ config.car_price_cap_pct % of depreciated_car_value
-        C. Reductions      → sequential multipliers + salvage deduction
+        B. Denial check → ANY flag True → payout = 0, pipeline stops immediately
+        C. Reductions   → sequential multipliers + salvage deduction
 
     Args:
-        ml_damage_estimate: Raw ML model output in dollars — reference only.
-        car_price:          Original market value of the insured vehicle in dollars.
+        ml_damage_estimate: ML model output in dollars — used as base payout.
         denial_flags:       DenialFlags instance — any True field voids the claim.
         reduction_factors:  ReductionFactors instance — penalty/deduction inputs.
-        incident_type:      Incident type string (e.g. "Vehicle Theft").
-        incident_severity:  Severity string (e.g. "Total Loss", "Major Damage").
-        auto_year:          Vehicle model year — used to compute age-based depreciation.
-                            Pass 0 to skip depreciation (depreciated_car_value = car_price).
         config:             Optional PolicyConfig for custom thresholds.
 
     Returns:
         dict with keys:
-            "ml_damage_estimate"   (float)      — raw ML output, for reference
-            "depreciated_car_value"(float)      — car value after age-based depreciation
-            "final_payout"         (float)      — adjusted payout in dollars
-            "denied"               (bool)       — True if claim was voided
-            "denial_reason"        (str | None) — human-readable denial reason
-            "adjustments"          (list[dict]) — ordered audit trail
+            "ml_damage_estimate" (float)      — raw ML output / base payout
+            "final_payout"       (float)      — adjusted payout in dollars
+            "denied"             (bool)       — True if claim was voided
+            "denial_reason"      (str | None) — human-readable denial reason
+            "adjustments"        (list[dict]) — ordered audit trail
     """
     if config is None:
         config = PolicyConfig()
@@ -613,11 +374,10 @@ def evaluate_claim(
     denied, denial_reason = _check_denial(denial_flags)
     if denied:
         return {
-            "ml_damage_estimate":    round(float(ml_damage_estimate), 2),
-            "depreciated_car_value": 0.0,
-            "final_payout":          0.0,
-            "denied":                True,
-            "denial_reason":         denial_reason,
+            "ml_damage_estimate": round(float(ml_damage_estimate), 2),
+            "final_payout":       0.0,
+            "denied":             True,
+            "denial_reason":      denial_reason,
             "adjustments": [
                 {
                     "rule":          "claim_denial",
@@ -629,29 +389,7 @@ def evaluate_claim(
         }
 
     adjustments: list = []
-
-    # ---- DEPRECIATION: compute once, used by every downstream rule -----------
-    depreciated_car_value, dep_audit = _compute_depreciated_car_value(
-        car_price=float(car_price),
-        auto_year=int(auto_year),
-        config=config,
-    )
-    adjustments.append(dep_audit)
-
-    # ---- STEP 0: Base payout — derived from depreciated_car_value only ------
-    current, base_audit = _compute_base_payout(
-        incident_type=incident_type,
-        incident_severity=incident_severity,
-        depreciated_car_value=depreciated_car_value,
-        ml_damage_estimate=float(ml_damage_estimate),
-        config=config,
-    )
-    adjustments.append(base_audit)
-
-    # ---- RULE A: Car price cap — uses depreciated_car_value as the ceiling ---
-    current = _apply_car_price_cap(
-        current, depreciated_car_value, config.car_price_cap_pct, adjustments
-    )
+    current = float(ml_damage_estimate)
 
     # ---- DASHCAM TRIGGER: force-activate penalties before reductions ----------
     reduction_factors = _apply_dashcam_trigger(current, reduction_factors, adjustments)
@@ -660,16 +398,10 @@ def evaluate_claim(
     current, reduction_adjustments = _apply_reductions(current, reduction_factors, config)
     adjustments.extend(reduction_adjustments)
 
-    # ---- FINAL PAYOUT CAP: hard ceiling after all reductions -----------------
-    current = _apply_final_payout_cap(
-        current, float(car_price), config.final_payout_cap_pct, adjustments
-    )
-
     return {
-        "ml_damage_estimate":    round(float(ml_damage_estimate), 2),
-        "depreciated_car_value": round(depreciated_car_value, 2),
-        "final_payout":          round(max(0.0, current), 2),
-        "denied":                False,
-        "denial_reason":         None,
-        "adjustments":           adjustments,
+        "ml_damage_estimate": round(float(ml_damage_estimate), 2),
+        "final_payout":       round(max(0.0, current), 2),
+        "denied":             False,
+        "denial_reason":      None,
+        "adjustments":        adjustments,
     }
