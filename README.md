@@ -33,11 +33,11 @@ It also provides a simple explanation of why a prediction was made, making the s
 
 ## Features
 
-- 📥 Input insurance claim details via UI
-- 🤖 Predict claim cost using ML model
-- ⚠️ Classify risk level
-- 🧾 Explain prediction in simple language
-- 📈 Easy-to-use web interface
+- Input insurance claim details via UI
+- Predict claim cost using ML model
+- Classify risk level
+- Explain prediction in simple language
+- Easy-to-use web interface
 
 ---
 
