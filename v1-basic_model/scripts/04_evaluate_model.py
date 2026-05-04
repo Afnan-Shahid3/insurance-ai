@@ -24,8 +24,8 @@ from src.models.explainer import (
 
 def load_test_data():
     """Load test features and target for evaluation."""
-    X_test = pd.read_csv("data/processed/test_features.csv")
-    y_test = pd.read_csv("data/processed/test_target.csv")
+    X_test = pd.read_csv("v1-basic_model/data/processed/test_features.csv")
+    y_test = pd.read_csv("v1-basic_model/data/processed/test_target.csv")
     
     # Flatten if needed
     if isinstance(y_test, pd.DataFrame):
@@ -36,7 +36,7 @@ def load_test_data():
 
 if __name__ == "__main__":
     # Configuration
-    MODEL_PATH = "models/saved_models/best_model.pkl"
+    MODEL_PATH = "v1-basic_model/models/saved_models/best_model.pkl"
     
     print("=" * 60)
     print("MODEL EVALUATION & EXPLANATION")
